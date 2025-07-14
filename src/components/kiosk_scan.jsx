@@ -142,11 +142,12 @@ export default function KioskScan() {
     }, 'image/jpeg', 0.8);
   }, []);
 
-  const processImages = useCallback(async () => {
+const processImages = useCallback(async () => {
   if (capturedImages.length === 0 || !user) return;
 
+  console.log('🚀 Starting image processing...');
   setIsProcessing(true);
-  setProcessingStatus([]);
+  setProcessingStatus(['Uploading images for processing...']);
 
   const formData = new FormData();
   formData.append('customer_id', user.id);
@@ -157,64 +158,91 @@ export default function KioskScan() {
   });
 
   try {
+    console.log('📡 Making request to backend...');
     const response = await fetch(`${apiService.baseURL}/recycling/process-batch-advanced`, {
       method: 'POST',
       body: formData
     });
 
+    console.log('📥 Response received:', response.status);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    console.log('🔄 Starting SSE processing...');
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let eventType = '';
+    let buffer = '';
+    let processedEvents = 0;
+
+    // Add timeout for SSE processing
+    const startTime = Date.now();
+    const SSE_TIMEOUT = 60000; // 60 seconds
 
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      // Check for timeout
+      if (Date.now() - startTime > SSE_TIMEOUT) {
+        throw new Error('SSE processing timeout');
+      }
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      const { done, value } = await reader.read();
+      console.log('📊 SSE chunk received, done:', done);
+      
+      if (done) {
+        console.log('✅ SSE stream completed');
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
       for (const line of lines) {
-        if (line.startsWith('event:')) {
-          eventType = line.substring(6).trim();
-        } else if (line.startsWith('data:')) {
+        const trimmedLine = line.trim();
+        console.log('📝 Processing line:', trimmedLine);
+        
+        if (trimmedLine.startsWith('event:')) {
+          eventType = trimmedLine.substring(6).trim();
+          console.log('🎯 Event type:', eventType);
+        } else if (trimmedLine.startsWith('data:')) {
           try {
-            const dataString = line.substring(5).trim();
-            if (dataString && dataString !== '') {
+            const dataString = trimmedLine.substring(5).trim();
+            
+            if (dataString && dataString.length > 0 && dataString.startsWith('{')) {
               const data = JSON.parse(dataString);
+              processedEvents++;
+              console.log('📦 Parsed data:', data);
               
               switch (eventType) {
-                case 'batch_start':
-                  setProcessingStatus([`Processing ${data.total_items} items...`]);
-                  break;
-                case 'item_status':
-                  setProcessingStatus(prev => [...prev, `${data.item_id}: ${data.message}`]);
-                  break;
-                case 'item_complete':
-                  setProcessingStatus(prev => [...prev, 
-                    `✅ ${data.item_id}: ${data.product_name} - $${data.total_reward}`
-                  ]);
-                  break;
                 case 'batch_complete':
+                  console.log('🎉 Batch complete, navigating to summary...');
                   setResults(data);
                   setIsProcessing(false);
-                  setTimeout(() => {
-                    navigate('/summary', { state: { results: data } });
-                  }, 2000);
-                  break;
+                  navigate('/summary', { state: { results: data } });
+                  return; // Exit the function
+                  
+                default:
+                  setProcessingStatus(prev => [...prev, `Event: ${eventType}`]);
               }
             }
           } catch (parseError) {
-            console.error('Failed to parse SSE data:', parseError);
+            console.warn('⚠️ Parse error:', parseError);
           }
         }
-      } // ✅ Closing brace for 'for' loop
-    } // ✅ Closing brace for 'while' loop
+      }
+    }
+
   } catch (error) {
-    console.error('Processing failed:', error);
-    alert(`Processing failed: ${error.message}`);
+    console.error('💥 Processing failed:', error);
+    setProcessingStatus(['❌ Processing failed: ' + error.message]);
     setIsProcessing(false);
+    alert(`Processing failed: ${error.message}`);
   }
 }, [capturedImages, user, navigate]);
+
+
 
   // Camera initialization with proper timing
   useEffect(() => {

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import apiService from '../services/apiService';
-import { useAuth } from '../hooks/useAuth';
 
 const SummaryContainer = styled.div`
   padding: 2rem;
@@ -37,54 +36,137 @@ const StatCard = styled.div`
 export default function SummaryPage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [analytics, setAnalytics] = useState(null);
+  const [user, setUser] = useState(null);
   
   const results = location.state?.results;
 
+  // Debug logging
+  useEffect(() => {
+    console.log('📄 Summary page mounted');
+    console.log('📍 Location state:', location.state);
+    console.log('📊 Results received:', results);
+  }, [location.state, results]);
+
+  // Get user from localStorage (kiosk authentication)
+  useEffect(() => {
+    const kioskUser = localStorage.getItem('kioskUser');
+    if (kioskUser) {
+      try {
+        const userData = JSON.parse(kioskUser);
+        setUser(userData);
+        console.log('👤 User data loaded:', userData);
+      } catch (error) {
+        console.error('Failed to parse kiosk user data:', error);
+      }
+    }
+  }, []);
+
+  // Fetch analytics (optional - can be disabled for testing)
   useEffect(() => {
     const fetchAnalytics = async () => {
       if (!user) return;
       
       try {
+        console.log('📈 Fetching analytics for user:', user.id);
         const analyticsData = await apiService.makeRequest(`/analytics/customer/${user.id}`);
         setAnalytics(analyticsData);
+        console.log('📊 Analytics loaded:', analyticsData);
       } catch (error) {
         console.error('Failed to fetch analytics:', error);
+        // Don't show error to user, just log it
       }
     };
 
     fetchAnalytics();
   }, [user]);
 
+  // Redirect if no results data
+  useEffect(() => {
+    if (!results) {
+      console.warn('⚠️ No results data, redirecting to scan page');
+      setTimeout(() => {
+        navigate('/scan');
+      }, 3000);
+    }
+  }, [results, navigate]);
+
   return (
     <SummaryContainer>
       <h1 style={{ color: 'white', textAlign: 'center' }}>Recycling Summary</h1>
       
-      {results && (
+      {/* User Welcome Card */}
+      {user && (
+        <Card>
+          <h2>👋 Welcome back, {user.full_name}!</h2>
+          <p>Loyalty Tier: <strong>{user.loyalty_tier}</strong></p>
+          <p>Total Points: <strong>{user.total_points}</strong></p>
+        </Card>
+      )}
+      
+      {/* Results Card */}
+      {results ? (
         <Card>
           <h2>🎉 Session Complete!</h2>
           <StatGrid>
             <StatCard>
-              <h3>{results.summary.total_items}</h3>
+              <h3>{results.summary?.total_items || 'N/A'}</h3>
               <p>Items Processed</p>
             </StatCard>
             <StatCard>
-              <h3>{results.summary.successful_items}</h3>
+              <h3>{results.summary?.successful_items || 'N/A'}</h3>
               <p>Successfully Identified</p>
             </StatCard>
             <StatCard>
-              <h3>${results.summary.total_reward}</h3>
+              <h3>${results.summary?.total_reward || '0.00'}</h3>
               <p>Rewards Earned</p>
             </StatCard>
             <StatCard>
-              <h3>{results.summary.success_rate}%</h3>
+              <h3>{results.summary?.success_rate || 0}%</h3>
               <p>Success Rate</p>
             </StatCard>
           </StatGrid>
+          
+          {/* Individual Items */}
+          {results.items && results.items.length > 0 && (
+            <div>
+              <h3>📦 Items Processed:</h3>
+              {results.items.map((item, index) => (
+                <div key={index} style={{
+                  background: '#f0f0f0',
+                  padding: '0.5rem',
+                  margin: '0.5rem 0',
+                  borderRadius: '5px'
+                }}>
+                  <strong>{item.product_name || `Item ${index + 1}`}</strong> - 
+                  ${item.reward || '0.00'} ({item.category || 'unknown'})
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      ) : (
+        <Card>
+          <h2>⚠️ No Results Available</h2>
+          <p>No processing results were found. You will be redirected to the scan page in a few seconds.</p>
+          <button 
+            onClick={() => navigate('/scan')}
+            style={{
+              background: '#ff9800',
+              color: 'white',
+              border: 'none',
+              padding: '1rem 2rem',
+              borderRadius: '25px',
+              fontSize: '1.1rem',
+              cursor: 'pointer'
+            }}
+          >
+            🔄 Go to Scanner
+          </button>
         </Card>
       )}
 
+      {/* Analytics Card (Optional) */}
       {analytics && (
         <Card>
           <h2>📊 Your Recycling Journey</h2>
@@ -102,16 +184,21 @@ export default function SummaryPage() {
               <p>Day Streak</p>
             </StatCard>
             <StatCard>
-              <h3>{analytics.environmental_impact.co2_saved} kg</h3>
+              <h3>{analytics.environmental_impact?.co2_saved || 0} kg</h3>
               <p>CO₂ Saved</p>
             </StatCard>
           </StatGrid>
           
-          <h3>Favorite Categories:</h3>
-          <p>{analytics.favorite_categories.join(', ')}</p>
+          {analytics.favorite_categories && (
+            <div>
+              <h3>Favorite Categories:</h3>
+              <p>{analytics.favorite_categories.join(', ')}</p>
+            </div>
+          )}
         </Card>
       )}
 
+      {/* Navigation Card */}
       <Card>
         <button 
           onClick={() => navigate('/scan')}
@@ -142,6 +229,25 @@ export default function SummaryPage() {
           }}
         >
           🏠 Return Home
+        </button>
+        
+        <button 
+          onClick={() => {
+            localStorage.removeItem('kioskUser');
+            navigate('/kiosk-auth');
+          }}
+          style={{
+            background: '#f44336',
+            color: 'white',
+            border: 'none',
+            padding: '1rem 2rem',
+            borderRadius: '25px',
+            fontSize: '1.1rem',
+            cursor: 'pointer',
+            marginLeft: '1rem'
+          }}
+        >
+          🚪 Logout
         </button>
       </Card>
     </SummaryContainer>
