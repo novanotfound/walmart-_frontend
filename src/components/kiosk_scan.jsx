@@ -199,41 +199,77 @@ const processImages = useCallback(async () => {
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
-      for (const line of lines) {
-        const trimmedLine = line.trim();
-        console.log('📝 Processing line:', trimmedLine);
+for (const line of lines) {
+  let trimmedLine = line.trim();
+  
+  // Remove extra "data: " prefix if it exists
+  if (trimmedLine.startsWith('data: ')) {
+    trimmedLine = trimmedLine.substring(6).trim();
+  }
+  
+  console.log('📝 Processing cleaned line:', trimmedLine);
+  
+  if (trimmedLine.startsWith('event:')) {
+    eventType = trimmedLine.substring(6).trim();
+    console.log('🎯 Event type:', eventType);
+  } else if (trimmedLine.startsWith('data:')) {
+    try {
+      const dataString = trimmedLine.substring(5).trim();
+      
+      if (dataString && dataString.length > 0 && dataString.startsWith('{')) {
+        const data = JSON.parse(dataString);
+        processedEvents++;
+        console.log('📦 Parsed data:', data);
         
-        if (trimmedLine.startsWith('event:')) {
-          eventType = trimmedLine.substring(6).trim();
-          console.log('🎯 Event type:', eventType);
-        } else if (trimmedLine.startsWith('data:')) {
-          try {
-            const dataString = trimmedLine.substring(5).trim();
+        switch (eventType) {
+          case 'batch_start':
+            setProcessingStatus([`Processing ${data.total_items} items...`]);
+            break;
             
-            if (dataString && dataString.length > 0 && dataString.startsWith('{')) {
-              const data = JSON.parse(dataString);
-              processedEvents++;
-              console.log('📦 Parsed data:', data);
-              
-              switch (eventType) {
-                case 'batch_complete':
-                  console.log('🎉 Batch complete, navigating to summary...');
-                  setResults(data);
-                  setIsProcessing(false);
-                  navigate('/summary', { state: { results: data } });
-                  return; // Exit the function
-                  
-                default:
-                  setProcessingStatus(prev => [...prev, `Event: ${eventType}`]);
-              }
+          case 'item_status':
+            setProcessingStatus(prev => [...prev, `⏳ ${data.item_id}: ${data.message}`]);
+            break;
+            
+          case 'item_complete':
+            if (data.success) {
+              setProcessingStatus(prev => [...prev, 
+                `✅ ${data.item_id}: Product recognized - $${data.total_reward || 0}`
+              ]);
+            } else {
+              setProcessingStatus(prev => [...prev, 
+                `❌ ${data.item_id}: ${data.error || 'Processing failed'}`
+              ]);
             }
-          } catch (parseError) {
-            console.warn('⚠️ Parse error:', parseError);
-          }
+            break;
+            
+          case 'batch_complete':
+            console.log('🎉 Batch complete event received!');
+            console.log('📊 Final results:', data);
+            
+            setProcessingStatus(prev => [...prev, 
+              `🎉 Processing complete! Total reward: $${data.summary.total_reward}`
+            ]);
+            
+            setResults(data);
+            setIsProcessing(false);
+            
+            console.log('🧭 About to navigate to summary...');
+            setTimeout(() => {
+              console.log('⏰ Navigating now...');
+              navigate('/summary', { state: { results: data } });
+            }, 1000);
+            return; // Exit the function
+            
+          default:
+            console.log('❓ Unknown event type:', eventType, data);
         }
       }
+    } catch (parseError) {
+      console.warn('⚠️ Parse error:', parseError, 'Line:', trimmedLine);
     }
-
+  }
+}
+  }
   } catch (error) {
     console.error('💥 Processing failed:', error);
     setProcessingStatus(['❌ Processing failed: ' + error.message]);
